@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use chrono::prelude::*;
+use ::time::OffsetDateTime;
 use futures_util::{future::Future, ready, sink::Sink, stream::Stream};
 use irc_interface::{Decoder, Encoder, Framed, MessageCodec};
 use pin_project::pin_project;
@@ -90,8 +90,9 @@ where
     fn send_ping(self: Pin<&mut Self>) -> error::Result<()> {
         log::trace!("Sending PING");
 
-        // Creates new ping data using the local timestamp.
-        let data = format!("{}", Local::now().timestamp());
+        // Creates new ping data using the UTC timestamp.
+        let timestamp = OffsetDateTime::now_utc().unix_timestamp();
+        let data = timestamp.to_string();
 
         let mut this = self.project();
 

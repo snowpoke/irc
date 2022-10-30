@@ -48,8 +48,6 @@
 //! # }
 //! ```
 
-#[cfg(feature = "ctcp")]
-use chrono::prelude::*;
 use futures_util::{
     future::{FusedFuture, Future},
     ready,
@@ -69,12 +67,14 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use time::OffsetDateTime;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::{
     client::{
         conn::Connection,
         data::{Config, User},
+        rfc_2822::RFC_2822,
     },
     error,
 };
@@ -101,6 +101,7 @@ pub mod conn;
 pub mod data;
 mod mock;
 pub mod prelude;
+mod rfc_2822;
 pub mod transport;
 
 /// The IRC Codec that is used when no other codec is specified.
@@ -441,8 +442,8 @@ macro_rules! pub_sender_base {
         where
             S: fmt::Display,
         {
-            let time = Local::now();
-            self.send_ctcp(target, &format!("PING {}", time.timestamp())[..])
+            let time = OffsetDateTime::now_utc();
+            self.send_ctcp(target, &format!("PING {}", time.unix_timestamp())[..])
         }
 
         /// Sends a time request to the specified target.
@@ -881,7 +882,15 @@ where
         } else if tokens[0].eq_ignore_ascii_case("PING") && tokens.len() > 1 {
             self.send_ctcp_internal(resp, &format!("PING {}", tokens[1]))
         } else if tokens[0].eq_ignore_ascii_case("TIME") {
-            self.send_ctcp_internal(resp, &format!("TIME :{}", Local::now().to_rfc2822()))
+            // On UNIX systems, `OffsetDateTime::now_local` calls the system function `localtime_r`, which may segfault in multi-threaded applications
+            // therefore, the function will fail if run in a multi-threaded UNIX context
+            // see: https://github.com/time-rs/time/issues/293
+            // the function can be made to run regardless if during compilation, the environment variable `RUSTFLAGS='--cfg unsound_local_offset'` is set
+            // workaround: should we not be able to get the offset, we'll fallback to the UTC time
+            let local_time =
+                OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+
+            self.send_ctcp_internal(resp, &format!("TIME :{}", local_time.format(RFC_2822)?))
         } else if tokens[0].eq_ignore_ascii_case("USERINFO") {
             self.send_ctcp_internal(resp, &format!("USERINFO :{}", self.config().user_info()))
         } else {
